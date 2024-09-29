@@ -2,8 +2,10 @@
   "tasks": {
     "dev": "deno run --watch -A server.ts"
   },
-  "imports": { "@std/msgpack": "jsr:@std/msgpack@^1.0.2" },
   "fmt": {
     "singleQuote": true
+  },
+  "imports": {
+    "@std/msgpack": "jsr:@std/msgpack@^1.0.2"
   }
 }
