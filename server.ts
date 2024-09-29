@@ -1,13 +1,16 @@
+import { encode } from '@std/msgpack';
+
 const users = new Map<
   string,
   { id: string; socket: WebSocket; ip: string | null }
 >();
 
 // deno-lint-ignore no-explicit-any
-function broadcast(data: any, excludeId?: string) {
+function broadcast(data: any, forceEncode = true, excludeId?: string) {
+  const encodedData = forceEncode ? encode(data) : data;
   users.forEach((user) => {
     if (user.id !== excludeId && user.socket.readyState === WebSocket.OPEN) {
-      user.socket.send(typeof data === 'string' ? data : JSON.stringify(data));
+      user.socket.send(encodedData);
     }
   });
 }
@@ -29,7 +32,7 @@ Deno.serve((request, info) => {
   });
 
   socket.addEventListener('message', (e) => {
-    broadcast(e.data, id);
+    broadcast(e.data, false, id);
   });
 
   socket.addEventListener('close', () => {
