@@ -6,6 +6,7 @@
     "singleQuote": true
   },
   "imports": {
+    "@oak/oak": "jsr:@oak/oak@^17.0.0",
     "@std/msgpack": "jsr:@std/msgpack@^1.0.2"
   }
 }

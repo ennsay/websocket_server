@@ -1,46 +1,86 @@
 import { encode } from '@std/msgpack';
+import { Application } from '@oak/oak/application';
+import { Router } from '@oak/oak/router';
 
-const users = new Map<
-  string,
-  { id: string; socket: WebSocket; ip: string | null }
->();
+const app = new Application();
+const router = new Router();
 
-// deno-lint-ignore no-explicit-any
-function broadcast(data: any, forceEncode = true, excludeId?: string) {
-  const encodedData = forceEncode ? encode(data) : data;
-  users.forEach((user) => {
-    if (user.id !== excludeId && user.socket.readyState === WebSocket.OPEN) {
-      user.socket.send(encodedData);
-    }
+type Socket = {
+  socketId: string;
+  socket: WebSocket;
+  ipAddr: string | null;
+};
+
+type Room = {
+  roomId: string;
+  sockets: Map<string, Socket>;
+};
+
+const rooms = new Map<string, Room>();
+
+type BroadcastOptions = {
+  forceEncode?: boolean;
+  excludeId?: string;
+};
+
+function broadcast(
+  roomId: string,
+  // deno-lint-ignore no-explicit-any
+  data: any,
+  options: BroadcastOptions = { forceEncode: true },
+) {
+  const dataEncoded = options.forceEncode ? encode(data) : data;
+  rooms.get(roomId)?.sockets.forEach((e) => {
+    if (
+      e.socketId === options.excludeId ||
+      e.socket.readyState !== WebSocket.OPEN
+    ) return;
+    e.socket.send(dataEncoded);
   });
 }
 
-Deno.serve((request, info) => {
-  if (request.headers.get('upgrade') !== 'websocket') {
-    return new Response(null, { status: 501 });
-  }
-  const { socket, response } = Deno.upgradeWebSocket(request);
-  const id = crypto.randomUUID();
+router.get('/chat/:id', (ctx) => {
+  if (ctx.isUpgradable) {
+    const socket = ctx.upgrade();
+    const roomId = ctx.params.id;
+    const id = crypto.randomUUID();
 
-  socket.addEventListener('open', () => {
-    const ip = ['tcp', 'udp'].includes(info.remoteAddr.transport)
-      ? `${info.remoteAddr.hostname}:${info.remoteAddr.port}`
-      : null;
-    users.set(id, { id, socket, ip });
-    broadcast({ count: users.size });
-    console.log(`Connected: ${ip || 'unknown'}`);
-  });
-
-  socket.addEventListener('message', (e) => {
-    broadcast(e.data, false, id);
-  });
-
-  socket.addEventListener('close', () => {
-    if (users.has(id)) {
-      users.delete(id);
-      broadcast({ count: users.size });
+    if (!rooms.has(roomId)) {
+      rooms.set(roomId, { roomId: id, sockets: new Map() });
     }
-  });
+    const room = rooms.get(roomId);
 
-  return response;
+    socket.addEventListener('open', () => {
+      const ipAddr = ctx.request.ip;
+      console.log(`Socket ${id} connected from ${ipAddr}`);
+
+      room?.sockets.set(id, { socketId: id, socket, ipAddr });
+      broadcast(roomId, { count: room?.sockets.size });
+    });
+
+    socket.addEventListener('message', (e) => {
+      broadcast(roomId, e.data, { excludeId: id, forceEncode: false });
+    });
+
+    socket.addEventListener('close', () => {
+      room?.sockets.delete(id);
+      broadcast(roomId, { count: room?.sockets.size });
+    });
+  } else {
+    ctx.response.status = 400;
+    ctx.response.body = 'Connection cannot be upgraded to WebSocket';
+  }
 });
+
+app.use(router.routes());
+app.use(router.allowedMethods());
+
+app.addEventListener('listen', (e) => {
+  console.log(
+    `Listening on ${e.secure ? 'https' : 'http'}://${
+      e.hostname ?? 'localhost'
+    }:${e.port}`,
+  );
+});
+
+app.listen({ port: 8080 });
